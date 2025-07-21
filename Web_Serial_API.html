@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="utf-8">
+    <title>シリアル通信 JavaScript</title>
+    <script>
+//Webサーバーから Web Serial API を使用する場合には https での接続が必要です。
+//ペアリング済みデバイスが追加された際のイベント
+navigator.serial.addEventListener('connect', e => {
+  addStatus("シリアルケーブルが接続されました。\n");
+});
+
+//ペアリング済みデバイスが削除された際のイベント
+navigator.serial.addEventListener('disconnect', e => {
+  addStatus("シリアルケーブルが切断されました。\n");
+});
+
+//ペアリング済みのシリアルデバイスから取得
+async function getDevice() {
+    let ports = await navigator.serial.getPorts();  //ペアリング済みデバイスの一覧取得
+    //const filter = { usbVendorId: 0x1A86 };  //USBベンダーIDを指定 Arduino Nano
+    //ports = await navigator.serial.getPort({ filters: [filter] });  //フィルタして
+    if (ports.length > 0) {
+        addStatus("ペアリング済みのシリアルデバイス:" + ports.length + "\n");
+        return ports[0];  //最初のデバイスを取得
+    } else {
+        return await navigator.serial.requestPort();  //デバイスがなければ選択
+    }
+};
+
+let port, reader;
+let openFlag = false;
+
+//ボタン押下 ポートオープン
+async function openButtonClick() {
+    if (openFlag) return; 
+
+    //シリアルポート選択
+    try {
+        port = await navigator.serial.requestPort();  //シリアルデバイス選択
+        //const filter = { usbVendorId: 0x1A86 };  //USBベンダーIDを指定 Arduino Nano
+        //port = await navigator.serial.requestPort({ filters: [filter] });  //フィルタしてシリアルデバイス選択
+        //port = await getDevice();  //ペアリング済みのシリアルデバイスから取得
+    } catch (e) {
+        addStatus("シリアルポートを選択してください。\n");
+        return;
+    }
+
+    //シリアルポートオープン
+    let baud = document.getElementById('baudRateSelect');
+    let bit = document.getElementById('dataBitsSelect');
+    let stop = document.getElementById('stopBitsSelect');
+    let pari = document.getElementById('paritySelect');
+    let frow = document.getElementById('flowControlSelect');
+    let bufSize = document.getElementById('bufferSizeSelect');
+    try {
+        await port.open({ baudRate: Number(baud.value) }, { dataBits: Number(bit.value) }, { stopBits: Number(stop.value) }, { parity: pari.value }, { flowControl: frow.value }, { bufferSize: Number(bufSize.value) });
+        addStatus("シリアルポート オープン\n");
+    } catch (e) {
+        addStatus("シリアルポート オープンエラー: " + e + "\n");
+        return;
+    }
+    openFlag = true;
+
+    //信号線
+    document.getElementById("dtr").checked = true;
+    port.setSignals({ dataTerminalReady: true });  //信号線DSRをON
+    document.getElementById("rts").checked = true;
+    port.setSignals({ requestToSend: true });  //信号線RTSをON
+    getDsrCts();  //信号線DSR/CTS取得
+
+    //シリアル受信
+    while (port.readable) {
+        reader = port.readable.getReader();  //リーダの取得・ロック
+        while (true) {
+            try {
+                const { value, done } = await reader.read();  //データ受信
+                if (done) break;  //cancelされた
+
+                //データ受信時の処理
+                const inputValue = new TextDecoder().decode(value);  //受信データをデコード
+                addRecive(inputValue);
+
+            } catch (e) {
+                addStatus("受信エラー: " + e + "\n");
+                break;
+            }
+        }
+        reader.releaseLock();  //リーダの解放
+        await port.close();  //シリアルポート クローズ
+        addStatus("シリアルポート クローズ\n");
+        openFlag = false;
+    }
+}
+
+//テキストエリア 受信データ書き込み
+function addRecive(msg) {
+    var textarea = document.getElementById('reciveArea');
+    textarea.value += msg;
+    textarea.scrollTop = textarea.scrollHeight;  //最下行表示
+}
+
+//テキストエリア ステータス書き込み
+function addStatus(msg) {
+    var statusText = document.getElementById('statusArea');
+    statusText.value += msg;
+    statusText.scrollTop = statusText.scrollHeight;  //最下行表示
+}
+
+//シリアル送信
+async function sendSerial() {
+    var sendText = document.getElementById('sendInput').value;  //送信データ取り込み
+    const encoder = new TextEncoder();
+    const writer = port.writable.getWriter();  //ライタの取得・ロック
+    await writer.write(encoder.encode(sendText + "\n"));  //CRを追加してエンコード後に送信
+    writer.releaseLock();  //ライタの解放
+    //document.getElementById('sendInput').value = "";  //送信テキスト消去
+}
+
+//ボタン押下 ポートクローズ
+function closeButtonClick() {
+    if (!openFlag) return;
+    try {
+        reader.cancel();  //readerをcancel
+    } catch (e) {
+        addStatus(e + "\n");
+    }
+}
+
+//チェックボックス DTR
+function dtrChange() {
+    if (!openFlag) return;
+    if (document.getElementById("dtr").checked) {
+        port.setSignals({ dataTerminalReady: true });
+        addStatus("DTR:ON\n");
+    } else {
+        port.setSignals({ dataTerminalReady: false });
+        addStatus("DTR:OFF\n");
+    }
+}
+
+//チェックボックス RTS
+function rtsChange() {
+    if (!openFlag) return;
+    if (document.getElementById("rts").checked) {
+        port.setSignals({ requestToSend: true });
+        addStatus("RTS:ON\n");
+    } else {
+        port.setSignals({ requestToSend: false });
+        addStatus("RTS:OFF\n");
+    }
+}
+
+//ボタン押下 DSR/CTS
+function getSignalsClick() {
+    if (openFlag) {
+        addStatus(getDsrCts() + "\n");
+    } else {
+        document.getElementById("dsrCts").innerText = "";
+    }
+}
+
+//信号線DSR/CTS 取得
+function getDsrCts() {
+    let signStr = "";
+    try {
+        const sign = port.getSignals();  //信号線の状態取得
+        if (sign.dataSetReady) {
+            signStr = "DSR:ON ";
+        } else {
+            signStr = "DSR:OFF ";
+        }
+        if (sign.clearToSend) {
+            signStr += "CTS:ON";
+        } else {
+            signStr += "CTS:OFF";
+        }
+        document.getElementById("dsrCts").innerText = signStr;
+    } catch (e) {
+        addStatus("信号線取得エラー: " + e + "\n");
+    }
+    return signStr;
+}
+
+//ボタン押下 受信データdownload
+function downloadClick() {
+    const output = document.querySelector('#reciveArea').value;  //downlooadデータ
+    if (output != "") {
+        const blob = new Blob([output], { type: "text/plain"});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "ReciveData.txt";  //ファイル名
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+}
+
+    </script>
+</head>
+
+<body>
+    <h1>シリアル通信 JavaScript</h1>
+    <select id="baudRateSelect">
+        <option value="4800">4800bps</option>
+        <option value="9600">9600bps</option>
+        <option value="19200">19200bps</option>
+        <option value="38400" selected>38400bps</option>
+        <option value="57600">57600bps</option>
+        <option value="115200">115200bps</option>
+    </select>
+    <select id="dataBitsSelect">
+        <option value="7">7bit</option>
+        <option value="8" selected>8bit</option>
+    </select>
+    <select id="stopBitsSelect">
+        <option value="1" selected>stop1</option>
+        <option value="2">stop2</option>
+    </select>
+    <select id="paritySelect">
+        <option value="none" selected>none</option>
+        <option value="even">even</option>
+        <option value="odd">odd</option>
+    </select>
+    <select id="flowControlSelect">
+        <option value="none" selected>none</option>
+        <option value="hardware">hardware</option>
+    </select>
+    Buffer=
+    <select id="bufferSizeSelect">
+        <option value="255" selected>255</option>
+        <option value="512">512</option>
+        <option value="1024">1024</option>
+        <option value="4096">4096</option>
+    </select>
+    <button onclick="openButtonClick()">Open Selected ComPort</button>
+    <br>
+    <input type="checkbox" id="dtr" onchange="dtrChange()">DTR
+    <input type="checkbox" id="rts" onchange="rtsChange()">RTS
+    <button onclick="getSignalsClick()">Get DSR/CTS</button>
+    <label id="dsrCts"></label>
+    <br>
+    <input type="text" size="70" id="sendInput">
+    <input type="button" value="Send" onclick="sendSerial()">
+    <br>
+    <textarea cols="80" rows="10" id="reciveArea"></textarea>
+    <button onclick="downloadClick()">Download</button>
+    <br>
+    <textarea cols="80" rows="5" id="statusArea" readonly></textarea>
+    <br>
+    <button onclick="closeButtonClick()">Close</button>
+</body>
+
+</html>
