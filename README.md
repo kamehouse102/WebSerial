@@ -1,26 +1,26 @@
 # name
-sample
+Web Serial
 
-![screenShot](https://github.com/user-attachments/assets/f1d2c6f2-97df-44a0-8c5a-cf3310e08078)
-
+![screenShot](https://github.com/user-attachments/assets/1ba10fd8-13a2-4087-8f5f-758e41dc8924)
 
 ## Overview
-概要。基本的に１～２行くらいに収まるようにします。
+Web Serial APIを使ったシリアル通信テスト
 
 ## Requirement
-動作環境や、必要なライブラリなどについて言及しています。必要があればバージョンなども載せます。
+Google Chrome、Microsoft edge
+
+ただし、スマートホンやタブレットでは Web Serial API が動作しないため使用できません。
 
 ## Usage
-簡単な使い方。
+ブラウザで Web_Serial_API.html を開いて通信設定を入力後に Openボタン でデバイスを選択してください。
 
 ## Features
-詳しい仕様について箇条書きにて記載。
+送信データエリアに文字を入力して sendボタン を押すと入力データを送信します。
 
-## Reference
-参考にしたWebサイトのURLなどを記載。
+受信データは都度表示をされます。
 
 ## Author
-作者のコメントや情報。
+文字データなどの簡単な通信テストであれば気軽に使用できます。
 
 ## Licence
 The source code is licensed MIT. The website content is licensed CC BY 4.0,see LICENSE.
