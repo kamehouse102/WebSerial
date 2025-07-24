@@ -9,7 +9,7 @@ Web Serial APIを使ったシリアル通信テスト
 ## Requirement
 Google Chrome、Microsoft edge
 
-ただし、スマートホンやタブレットでは Web Serial API が動作しないため使用できません。
+ただし、古いバージョンなど Web Serial API が動作しない場合は使用できません。
 
 ## Usage
 ブラウザで Web_Serial_API.html を開いて通信設定を入力後に Openボタン でデバイスを選択してください。
