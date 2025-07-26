@@ -3,17 +3,26 @@
 
 <head>
     <meta charset="utf-8">
-    <title>シリアル通信 JavaScript</title>
-    <script>
+    <title>Web Serial</title>
+<script>
 //Webサーバーから Web Serial API を使用する場合には https での接続が必要です。
+let port, reader;
+let openFlag = false;
+let timeoutFlag;
+
+//Web Serial API サポート可否確認
+if ("serial" in navigator) {
+  addStatus("The Web Serial API is supported.");
+}
+
 //ペアリング済みデバイスが追加された際のイベント
 navigator.serial.addEventListener('connect', e => {
-  addStatus("シリアルケーブルが接続されました。\n");
+  addStatus("Cable is connected.\n");
 });
 
 //ペアリング済みデバイスが削除された際のイベント
 navigator.serial.addEventListener('disconnect', e => {
-  addStatus("シリアルケーブルが切断されました。\n");
+  addStatus("Cable is disconnected.\n");
 });
 
 //ペアリング済みのシリアルデバイスから取得
@@ -22,15 +31,63 @@ async function getDevice() {
     //const filter = { usbVendorId: 0x1A86 };  //USBベンダーIDを指定 Arduino Nano
     //ports = await navigator.serial.getPort({ filters: [filter] });  //フィルタして
     if (ports.length > 0) {
-        addStatus("ペアリング済みのシリアルデバイス:" + ports.length + "\n");
+        addStatus("Paired Serial Devices:" + ports.length + "\n");
         return ports[0];  //最初のデバイスを取得
     } else {
         return await navigator.serial.requestPort();  //デバイスがなければ選択
     }
 };
 
-let port, reader;
-let openFlag = false;
+//シリアル受信
+async function recvSerial() {
+    while (port.readable) {
+        //シリアル受信
+        reader = port.readable.getReader();  //リーダの取得・ロック
+        let receivedBytes = new Uint8Array(0);  //受信バッファ
+        try {
+            while (true) {
+                //タイムアウト設定
+                var timeout = Number(document.getElementById('timeoutSelect').value);
+                timeoutFlag = false;
+                if(timeout > 0) {
+                    var timeoutId = setTimeout(() => {
+                        timeoutFlag = true;
+                        reader.releaseLock();
+                    }, timeout);
+                }
+                const { value, done } = await reader.read();  //データ受信
+                if(timeout > 0) clearTimeout(timeoutId);
+                if(done) break;  //ポートが閉じられたか、データの受信が停止
+                if(timeout == 0) {
+                    const decoder = new TextDecoder(document.getElementById('encodeSelect').value);
+                    const str = decoder.decode(value);
+                    addRecive(str);
+                    addStatus("Recv: " + createHexString(value) + "\n");
+                } else {
+                    // 受信データを連結
+                    const tempBuffer = new Uint8Array(receivedBytes.length + value.length);
+                    tempBuffer.set(receivedBytes);
+                    tempBuffer.set(value, receivedBytes.length);
+                    receivedBytes = tempBuffer;
+                }
+            }
+            reader.releaseLock();  //リーダの解放
+        } catch (e) {
+            if(timeoutFlag) {
+                if(receivedBytes.length > 0) {
+                    const decoder = new TextDecoder(document.getElementById('encodeSelect').value);
+                    const str = decoder.decode(receivedBytes);
+                    addRecive(str);
+                    addStatus("Recv: " + createHexString(receivedBytes) + "\n");
+                }
+            } else {
+                if(timeout > 0) clearTimeout(timeoutId);
+                addStatus(e + "\n");
+            }
+        }
+        if(!openFlag) break;
+    }
+}
 
 //ボタン押下 ポートオープン
 async function openButtonClick() {
@@ -43,7 +100,7 @@ async function openButtonClick() {
         //port = await navigator.serial.requestPort({ filters: [filter] });  //フィルタしてシリアルデバイス選択
         //port = await getDevice();  //ペアリング済みのシリアルデバイスから取得
     } catch (e) {
-        addStatus("シリアルポートを選択してください。\n");
+        addStatus(e + "\n");
         return;
     }
 
@@ -56,42 +113,30 @@ async function openButtonClick() {
     let bufSize = document.getElementById('bufferSizeSelect');
     try {
         await port.open({ baudRate: Number(baud.value) }, { dataBits: Number(bit.value) }, { stopBits: Number(stop.value) }, { parity: pari.value }, { flowControl: frow.value }, { bufferSize: Number(bufSize.value) });
-        addStatus("シリアルポート オープン\n");
+        addStatus("Open Serial port.\n");
     } catch (e) {
-        addStatus("シリアルポート オープンエラー: " + e + "\n");
+        addStatus(e + "\n");
         return;
     }
     openFlag = true;
 
-    //信号線
+    //信号線on/off
     document.getElementById("dtr").checked = true;
-    port.setSignals({ dataTerminalReady: true });  //信号線DSRをON
+    port.setSignals({ dataTerminalReady: true });  //DSRをON
     document.getElementById("rts").checked = true;
-    port.setSignals({ requestToSend: true });  //信号線RTSをON
+    port.setSignals({ requestToSend: true });  //RTSをON
+    //port.setSignals({ break: false });  //BreakをOFF
     getDsrCts();  //信号線DSR/CTS取得
+    //if(port.getSignals.dataCarrierDetect) addStatus("CD: ON\n");
+    //if(port.getSignals.ringIndicator) addStatus("RI: ON\n");
 
     //シリアル受信
-    while (port.readable) {
-        reader = port.readable.getReader();  //リーダの取得・ロック
-        while (true) {
-            try {
-                const { value, done } = await reader.read();  //データ受信
-                if (done) break;  //cancelされた
+    await recvSerial();
 
-                //データ受信時の処理
-                const inputValue = new TextDecoder().decode(value);  //受信データをデコード
-                addRecive(inputValue);
-
-            } catch (e) {
-                addStatus("受信エラー: " + e + "\n");
-                break;
-            }
-        }
-        reader.releaseLock();  //リーダの解放
-        await port.close();  //シリアルポート クローズ
-        addStatus("シリアルポート クローズ\n");
-        openFlag = false;
-    }
+    //シリアルポートクローズ
+    await port.close();
+    addStatus("Close Serial port.\n");
+    openFlag = false;
 }
 
 //テキストエリア 受信データ書き込み
@@ -108,14 +153,98 @@ function addStatus(msg) {
     statusText.scrollTop = statusText.scrollHeight;  //最下行表示
 }
 
+//SJISエンコード
+const table = { '\u00a5': 0x5c, '\u203e': 0x7e, '\u301c': 0x8160 };
+const decoder = new TextDecoder('shift-jis');
+for (let i = 0x81; i <= 0xfc; i++) {
+    if (i <= 0x84 || i >= 0x87 && i <= 0x9f || i >= 0xe0 && i <= 0xea || i >= 0xed && i <= 0xee || i >= 0xfa) {
+        for (let j = 0x40; j <= 0xfc; j++) {
+            const c = decoder.decode(new Uint8Array([i, j]));
+            if (c.length === 1 && c !== '\ufffd' && !table[c]) {
+                table[c] = i << 8 | j;
+            }
+        }
+    }
+}
+
+function sjisEncode(content) {
+    let buffer = [];
+    for (let i = 0; i < content.length; i++) {
+        const c = content.codePointAt(i);
+        if (c > 0xffff) i++;
+        if (c < 0x80) {
+            buffer.push(c);
+        } else if (c >= 0xff61 && c <= 0xff9f) {
+            buffer.push(c - 0xfec0);
+        } else {
+            const d = table[String.fromCodePoint(c)] || 0x3f;
+            if (d > 0xff) {
+                buffer.push(d >> 8 & 0xff, d & 0xff);
+            } else {
+                buffer.push(d);
+            }
+        }
+    }
+    return Uint8Array.from(buffer);
+};
+
+//16進数文字列→バイト配列へ変換（16進数でない文字は無視）
+function parseHexString(str) { 
+  var result = [];
+  var byteStr = "";
+  for(var i = 0; i < str.length; i++) {
+    if((str[i] >= "0" && str[i] <= "9") || (str[i].toUpperCase() >= "A" && str[i].toUpperCase() <= "F")) {
+      byteStr += str[i];
+    } else {
+      if(byteStr.length > 0) byteStr += " ";
+    }
+    if(byteStr.length == 2) {
+        result.push(parseInt(byteStr, 16));
+        byteStr = "";
+    }
+  }
+  if(byteStr.length > 0) result.push(parseInt(byteStr, 16));
+  return result;
+}
+
+//バイト配列→16進数文字列へ変換
+function createHexString(ary) {
+  var result = "";
+  for(var i = 0; i < ary.length; i++) {
+    var str = "0" + ary[i].toString(16);
+    result += str.substr(str.length - 2, 2) + " ";
+  }
+  return result.substr(0, result.length - 1);
+}
+
 //シリアル送信
 async function sendSerial() {
-    var sendText = document.getElementById('sendInput').value;  //送信データ取り込み
-    const encoder = new TextEncoder();
+    var dataAry = [];
+    if(document.getElementById('encodeSelect').value == "shift-jis") {
+      dataAry = sjisEncode(document.getElementById('sendInput').value);  //SJIS
+    } else {
+      const encoder = new TextEncoder();
+      dataAry = encoder.encode(document.getElementById('sendInput').value);  //UTF-8
+    }
+    headAry = parseHexString(document.getElementById('sendHeaderSelect').value);
+    footAry = parseHexString(document.getElementById('sendTerminaterSelect').value);
+    var byteAry =  new Uint8Array([...headAry, ...dataAry, ...footAry]);
     const writer = port.writable.getWriter();  //ライタの取得・ロック
-    await writer.write(encoder.encode(sendText + "\n"));  //CRを追加してエンコード後に送信
+    await writer.write(byteAry);  //送信
     writer.releaseLock();  //ライタの解放
-    //document.getElementById('sendInput').value = "";  //送信テキスト消去
+    addStatus("Send: " + createHexString(byteAry) + "\n");
+    //document.getElementById('sendInput').value = "";  //送信済みテキスト消去
+}
+
+//シリアル送信 バイト文字
+async function sendByteSerial() {
+    var byteStr = parseHexString(document.getElementById('sendByteInput').value)
+    var byteAry =  new Uint8Array(byteStr);
+    const writer = port.writable.getWriter();  //ライタの取得・ロック
+    await writer.write(byteAry);  //送信
+    writer.releaseLock();  //ライタの解放
+    addStatus("Send: " + createHexString(byteAry) + "\n");
+    //document.getElementById('sendByteInput').value = "";  //送信済みテキスト消去
 }
 
 //ボタン押下 ポートクローズ
@@ -123,6 +252,7 @@ function closeButtonClick() {
     if (!openFlag) return;
     try {
         reader.cancel();  //readerをcancel
+        openFlag = false;
     } catch (e) {
         addStatus(e + "\n");
     }
@@ -178,7 +308,7 @@ function getDsrCts() {
         }
         document.getElementById("dsrCts").innerText = signStr;
     } catch (e) {
-        addStatus("信号線取得エラー: " + e + "\n");
+        addStatus(e + "\n");
     }
     return signStr;
 }
@@ -198,12 +328,11 @@ function downloadClick() {
         URL.revokeObjectURL(url);
     }
 }
-
-    </script>
+</script>
 </head>
 
 <body>
-    <h1>シリアル通信 JavaScript</h1>
+    <h1>Web Serial</h1>
     <select id="baudRateSelect">
         <option value="4800">4800bps</option>
         <option value="9600">9600bps</option>
@@ -229,22 +358,56 @@ function downloadClick() {
         <option value="none" selected>none</option>
         <option value="hardware">hardware</option>
     </select>
-    Buffer=
+    <button onclick="openButtonClick()">Open Selected ComPort</button>
+    <br>
+    Buffer(byte)=
     <select id="bufferSizeSelect">
         <option value="255" selected>255</option>
         <option value="512">512</option>
         <option value="1024">1024</option>
         <option value="4096">4096</option>
     </select>
-    <button onclick="openButtonClick()">Open Selected ComPort</button>
+    Timeout(ms)=
+    <select id="timeoutSelect">
+        <option value="0">0</option>
+        <option value="1">1</option>
+        <option value="5">5</option>
+        <option value="10" selected>10</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+        <option value="500">500</option>
+        <option value="1000">1000</option>
+        <option value="5000">5000</option>
+    </select>
     <br>
     <input type="checkbox" id="dtr" onchange="dtrChange()">DTR
     <input type="checkbox" id="rts" onchange="rtsChange()">RTS
     <button onclick="getSignalsClick()">Get DSR/CTS</button>
     <label id="dsrCts"></label>
+    <select id="encodeSelect">
+        <option value="utf-8" selected>UTF-8</option>
+        <option value="shift-jis">SJIS</option>
+    </select>
     <br>
-    <input type="text" size="70" id="sendInput">
+    <select id="sendHeaderSelect">
+        <option value="" selected></option>
+        <option value="01">SOH</option>
+        <option value="02">STX</option>
+        <option value="1B">ESC</option>
+    </select>
+    <input type="text" size="60" id="sendInput">
+    <select id="sendTerminaterSelect">
+        <option value=""></option>
+        <option value="0D" selected>CR</option>
+        <option value="0A">LF</option>
+        <option value="0D,0A">CRLF</option>
+        <option value="03">ETX</option>
+        <option value="04">EOX</option>
+    </select>
     <input type="button" value="Send" onclick="sendSerial()">
+    <br>
+    <input type="text" size="77" id="sendByteInput">
+    <input type="button" value="SendByte" onclick="sendByteSerial()">
     <br>
     <textarea cols="80" rows="10" id="reciveArea"></textarea>
     <button onclick="downloadClick()">Download</button>
