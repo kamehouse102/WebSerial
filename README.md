@@ -1,7 +1,7 @@
 # name
 Web Serial
 
-![screenShot](https://github.com/user-attachments/assets/1ba10fd8-13a2-4087-8f5f-758e41dc8924)
+![screenShot](https://github.com/user-attachments/assets/dc817ad6-daa9-4637-aaeb-af7245bc9344)
 
 ## Overview
 Web Serial APIを使ったシリアル通信テスト
@@ -20,7 +20,7 @@ Google Chrome、Microsoft edge
 受信データは都度表示をされます。
 
 ## Author
-文字データなどの簡単な通信テストであれば気軽に使用できます。
+文字データやなどの簡単な通信テストであれば気軽に使用できます。
 
 ## Licence
 The source code is licensed MIT. The website content is licensed CC BY 4.0,see LICENSE.
